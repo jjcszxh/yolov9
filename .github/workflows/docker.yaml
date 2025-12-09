@@ -51,7 +51,7 @@ jobs:
 
       # 8️⃣ 上传 ONNX 模型作为 artifact
       - name: Upload ONNX model
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: yolov9-onnx-model
           path: ./yolov9/yolov9-t.onnx
