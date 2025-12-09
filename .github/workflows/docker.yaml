@@ -1,0 +1,57 @@
+name: Build YOLOv9 ONNX Model
+
+on:
+  workflow_dispatch:   # 支持手动触发
+  push:
+    branches:
+      - main
+
+jobs:
+  build-model:
+    runs-on: ubuntu-latest
+    steps:
+      # 1️⃣ 拉取仓库代码
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2️⃣ 安装 Python
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # 3️⃣ 安装依赖
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install onnx==1.18.0 onnxruntime onnx-simplifier onnxscript torch torchvision
+
+      # 4️⃣ 获取 YOLOv9 代码
+      - name: Clone YOLOv9 repo
+        run: git clone https://github.com/WongKinYiu/yolov9.git ./yolov9
+
+      # 5️⃣ 下载预训练权重
+      - name: Download YOLOv9 weights
+        run: |
+          MODEL_SIZE=t
+          IMG_SIZE=320
+          wget -O yolov9-${MODEL_SIZE}.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-${MODEL_SIZE}-converted.pt
+
+      # 6️⃣ 修改 experimental.py
+      - name: Patch experimental.py
+        run: |
+          sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" yolov9/models/experimental.py
+
+      # 7️⃣ 导出 ONNX 模型
+      - name: Export ONNX model
+        run: |
+          MODEL_SIZE=t
+          IMG_SIZE=320
+          python3 yolov9/export.py --weights ./yolov9-${MODEL_SIZE}.pt --imgsz ${IMG_SIZE} ${IMG_SIZE} --simplify --include onnx --device cpu
+
+      # 8️⃣ 上传 ONNX 模型作为 artifact
+      - name: Upload ONNX model
+        uses: actions/upload-artifact@v3
+        with:
+          name: yolov9-onnx-model
+          path: ./yolov9/yolov9-t.onnx
