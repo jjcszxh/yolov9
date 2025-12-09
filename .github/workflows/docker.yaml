@@ -1,57 +1,48 @@
-name: Build YOLOv9 ONNX Model
+name: Build YOLOv9 ONNX
 
 on:
-  workflow_dispatch:   # 支持手动触发
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  build-model:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      # 1️⃣ 拉取仓库代码
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # 2️⃣ 安装 Python
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Set build args
+      run: |
+        echo "MODEL_SIZE=t" >> $GITHUB_ENV
+        echo "IMG_SIZE=320" >> $GITHUB_ENV
 
-      # 3️⃣ 安装依赖
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r yolov9/requirements.txt
-          pip install onnx==1.18.0 onnxruntime onnx-simplifier onnxscript torch torchvision pandas
-      # 4️⃣ 获取 YOLOv9 代码
-      - name: Clone YOLOv9 repo
-        run: git clone https://github.com/WongKinYiu/yolov9.git ./yolov9
+    - name: Build YOLOv9 ONNX with Docker
+      run: |
+        docker build . \
+          --build-arg MODEL_SIZE=$MODEL_SIZE \
+          --build-arg IMG_SIZE=$IMG_SIZE \
+          --output . \
+          -f- <<'EOF'
+        FROM python:3.11 AS build
+        RUN apt-get update && apt-get install --no-install-recommends -y libgl1 && rm -rf /var/lib/apt/lists/*
+        COPY --from=ghcr.io/astral-sh/uv:0.8.0 /uv /bin/
+        WORKDIR /yolov9
+        ADD https://github.com/WongKinYiu/yolov9.git .
+        RUN uv pip install --system -r requirements.txt
+        RUN uv pip install --system onnx==1.18.0 onnxruntime onnx-simplifier>=0.4.1 onnxscript pandas
+        ARG MODEL_SIZE
+        ARG IMG_SIZE
+        ADD https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-${MODEL_SIZE}-converted.pt yolov9-${MODEL_SIZE}.pt
+        RUN sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" models/experimental.py
+        RUN python3 export.py --weights ./yolov9-${MODEL_SIZE}.pt --imgsz ${IMG_SIZE} --simplify --include onnx
+        FROM scratch
+        ARG MODEL_SIZE
+        ARG IMG_SIZE
+        COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
+        EOF
 
-      # 5️⃣ 下载预训练权重
-      - name: Download YOLOv9 weights
-        run: |
-          MODEL_SIZE=t
-          IMG_SIZE=320
-          wget -O yolov9-${MODEL_SIZE}.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-${MODEL_SIZE}-converted.pt
-
-      # 6️⃣ 修改 experimental.py
-      - name: Patch experimental.py
-        run: |
-          sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" yolov9/models/experimental.py
-
-      # 7️⃣ 导出 ONNX 模型
-      - name: Export ONNX model
-        run: |
-          MODEL_SIZE=t
-          IMG_SIZE=320
-          python3 yolov9/export.py --weights ./yolov9-${MODEL_SIZE}.pt --imgsz ${IMG_SIZE} ${IMG_SIZE} --simplify --include onnx --device cpu
-
-      # 8️⃣ 上传 ONNX 模型作为 artifact
-      - name: Upload ONNX model
-        uses: actions/upload-artifact@v4
-        with:
-          name: yolov9-onnx-model
-          path: ./yolov9/yolov9-t.onnx
+    - name: Upload ONNX Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: yolov9-onnx
+        path: yolov9-*.onnx
