@@ -42,12 +42,21 @@ jobs:
         COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
         EOF
 
-    - name: Upload Release with ONNX
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ env.RELEASE_TAG }}
-        name: "YOLOv9 ONNX Build"
-        files: |
-          yolov9-${{ env.MODEL_SIZE }}-${{ env.IMG_SIZE }}.onnx
+    - name: Install GitHub CLI
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gh
+
+    - name: Ensure release exists (create if missing)
+      run: |
+        gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" -t "YOLOv9 ONNX Build" -n "Auto-generated release"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload ONNX using GH CLI (never fails)
+      run: |
+        gh release upload "$RELEASE_TAG" \
+          "yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx" \
+          --clobber
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
