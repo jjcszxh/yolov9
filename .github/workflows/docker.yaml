@@ -15,7 +15,6 @@ jobs:
       run: |
         echo "MODEL_SIZE=m" >> $GITHUB_ENV
         echo "IMG_SIZE=320" >> $GITHUB_ENV
-        echo "RELEASE_TAG=v1.0" >> $GITHUB_ENV
 
     - name: Build YOLOv9 ONNX with Docker
       run: |
@@ -42,12 +41,8 @@ jobs:
         COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
         EOF
 
-    - name: Upload Release with ONNX
-      uses: softprops/action-gh-release@v2
+    - name: Upload ONNX Artifact
+      uses: actions/upload-artifact@v4
       with:
-        tag_name: ${{ env.RELEASE_TAG }}
-        name: "YOLOv9 ONNX Build"
-        files: |
-          yolov9-${{ env.MODEL_SIZE }}-${{ env.IMG_SIZE }}.onnx
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: yolov9-onnx
+        path: yolov9-*.onnx
