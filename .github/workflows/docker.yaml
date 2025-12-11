@@ -11,57 +11,43 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # ---- 自动生成 Release 版本号 YYYYMMDD ----
-    - name: Set dynamic release tag
+    - name: Set build args
       run: |
-        echo "RELEASE_TAG=v$(date +%Y%m%d)" >> $GITHUB_ENV
+        echo "MODEL_SIZE=m" >> $GITHUB_ENV
+        echo "IMG_SIZE=320" >> $GITHUB_ENV
+        echo "RELEASE_TAG=v1.0" >> $GITHUB_ENV
 
-    # ---- 定义需要批量编译的模型和分辨率 ----
-    - name: Set model matrices
+    - name: Build YOLOv9 ONNX with Docker
       run: |
-        echo "MODEL_SIZES=t s m c e" >> $GITHUB_ENV
-        echo "IMG_SIZES=320 640" >> $GITHUB_ENV
+        docker build . \
+          --build-arg MODEL_SIZE=$MODEL_SIZE \
+          --build-arg IMG_SIZE=$IMG_SIZE \
+          --output . \
+          -f- <<'EOF'
+        FROM python:3.11 AS build
+        RUN apt-get update && apt-get install --no-install-recommends -y libgl1 && rm -rf /var/lib/apt/lists/*
+        COPY --from=ghcr.io/astral-sh/uv:0.8.0 /uv /bin/
+        WORKDIR /yolov9
+        ADD https://github.com/WongKinYiu/yolov9.git .
+        RUN uv pip install --system -r requirements.txt
+        RUN uv pip install --system onnx==1.18.0 onnxruntime onnx-simplifier>=0.4.1 onnxscript
+        ARG MODEL_SIZE
+        ARG IMG_SIZE
+        ADD https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-${MODEL_SIZE}-converted.pt yolov9-${MODEL_SIZE}.pt
+        RUN sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" models/experimental.py
+        RUN python3 export.py --weights ./yolov9-${MODEL_SIZE}.pt --imgsz ${IMG_SIZE} --simplify --include onnx
+        FROM scratch
+        ARG MODEL_SIZE
+        ARG IMG_SIZE
+        COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
+        EOF
 
-    # ---- 主构建循环：批量构建 10 个模型 ----
-    - name: Build YOLOv9 ONNX (Batch)
-      run: |
-        for MODEL_SIZE in $MODEL_SIZES; do
-          for IMG_SIZE in $IMG_SIZES; do
-            echo "=== Building yolov9-${MODEL_SIZE} @ ${IMG_SIZE} ==="
-
-            docker build . \
-              --build-arg MODEL_SIZE=$MODEL_SIZE \
-              --build-arg IMG_SIZE=$IMG_SIZE \
-              --output . \
-              -f- <<'EOF'
-            FROM python:3.11 AS build
-            RUN apt-get update && apt-get install --no-install-recommends -y libgl1 && rm -rf /var/lib/apt/lists/*
-            COPY --from=ghcr.io/astral-sh/uv:0.8.0 /uv /bin/
-            WORKDIR /yolov9
-            ADD https://github.com/WongKinYiu/yolov9.git .
-            RUN uv pip install --system -r requirements.txt
-            RUN uv pip install --system onnx==1.18.0 onnxruntime onnx-simplifier>=0.4.1 onnxscript
-            ARG MODEL_SIZE
-            ARG IMG_SIZE
-            ADD https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-${MODEL_SIZE}-converted.pt yolov9-${MODEL_SIZE}.pt
-            RUN sed -i "s/ckpt = torch.load(attempt_download(w), map_location='cpu')/ckpt = torch.load(attempt_download(w), map_location='cpu', weights_only=False)/g" models/experimental.py
-            RUN python3 export.py --weights ./yolov9-${MODEL_SIZE}.pt --imgsz ${IMG_SIZE} --simplify --include onnx
-            FROM scratch
-            ARG MODEL_SIZE
-            ARG IMG_SIZE
-            COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
-            EOF
-          done
-        done
-
-    # ---- 上传所有 10 个模型到 Release ----
-    - name: Upload Release with ONNX files
+    - name: Upload Release with ONNX
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ env.RELEASE_TAG }}
-        name: "YOLOv9 ONNX Build ${{ env.RELEASE_TAG }}"
-        prerelease: false
+        name: "YOLOv9 ONNX Build"
         files: |
-          yolov9-*-*.onnx
+          yolov9-${{ env.MODEL_SIZE }}-${{ env.IMG_SIZE }}.onnx
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
