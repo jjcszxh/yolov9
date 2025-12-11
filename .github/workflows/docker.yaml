@@ -42,23 +42,11 @@ jobs:
         COPY --from=build /yolov9/yolov9-${MODEL_SIZE}.onnx /yolov9-${MODEL_SIZE}-${IMG_SIZE}.onnx
         EOF
 
-    - name: Install GitHub Release CLI
-      run: sudo apt-get install -y jq
-
-    - name: Create or Update Release
-      id: create_release
+    - name: Upload Release with ONNX
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ env.RELEASE_TAG }}
         name: "YOLOv9 ONNX Build"
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload ONNX to Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ env.RELEASE_TAG }}
         files: |
           yolov9-${{ env.MODEL_SIZE }}-${{ env.IMG_SIZE }}.onnx
       env:
